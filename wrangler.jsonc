@@ -1,0 +1,17 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	// 纯静态站：不需要 Worker 脚本，直接由 Workers Static Assets 托管 dist/
+	"name": "quark-physics-web",
+	"compatibility_date": "2026-08-01",
+	"assets": {
+		"directory": "./dist",
+		// 找不到的路径回落到 Starlight 生成的 404 页面
+		"not_found_handling": "404-page"
+	},
+	// 不要在这里写 routes / custom_domain：本机 API Token 没有 Workers Routes 编辑权限，
+	// 写了会让 deploy 走到最后一步报 Authentication error（Worker 其实已经传上去了）。
+	// 自定义域名用 CF API 的 /accounts/{id}/workers/domains 单独绑，见 SKILL.md 第 5 步。
+	"observability": {
+		"enabled": true
+	}
+}

@@ -1,0 +1,581 @@
+---
+// 首页 = 物理 playground 本体。路由优先级高于 Starlight 的 content collection。
+const SOURCE = 'https://github.com/erayzesen/QuarkPhysics';
+const AUTHOR = 'Eray Zesen';
+---
+
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>软体物理 playground · 戳一下会弹半天的果冻</title>
+    <meta
+      name="description"
+      content="把 QuarkPhysics 的软体物理算法用 JS 重写成网页版：果冻、弹簧链、箱子堆叠、布袋娃娃，鼠标能拖能甩能扔，刚度阻尼重力压强实时可调，不用装 SFML 和 CMake。"
+    />
+    <link rel="canonical" href="https://quark.leolee0812.site/" />
+    <meta property="og:title" content="软体物理 playground · 戳一下会弹半天的果冻" />
+    <meta
+      property="og:description"
+      content="原项目要装 SFML + CMake 才能看到效果，这里点开就能玩。"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://quark.leolee0812.site/" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='11' fill='none' stroke='%234de2ff' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%23ff5fa8'/%3E%3C/svg%3E"
+    />
+    <script
+      defer
+      src="https://static.cloudflareinsights.com/beacon.min.js"
+      data-cf-beacon='{"token": "48701f7045fb436d9e1a677adce6b2e6"}'></script>
+  </head>
+  <body>
+    <div class="glow glow-a"></div>
+    <div class="glow glow-b"></div>
+
+    <header class="topbar">
+      <div class="brand">
+        <span class="dot"></span>
+        <span>软体物理 playground</span>
+      </div>
+      <a class="src" href={SOURCE} target="_blank" rel="noopener">
+        算法源自 {AUTHOR} / QuarkPhysics · MIT ↗
+      </a>
+    </header>
+
+    <main>
+      <section class="hero">
+        <h1>
+          <span>戳一下，</span>
+          <span class="hl">它会弹半天</span>
+        </h1>
+        <p class="lede">
+          原项目是个 C++ 写的 2D 软体物理引擎，效果很好，但要看到得先装 SFML 和 CMake 编译。
+          这里把它的算法用 JS 重写了一遍，<b>直接用鼠标（或手指）拖、甩、扔</b>。
+        </p>
+      </section>
+
+      <section class="board">
+        <div class="tabs" role="tablist">
+          <button data-scene="jelly" class="tab">果冻广场</button>
+          <button data-scene="chain" class="tab">弹簧链</button>
+          <button data-scene="stack" class="tab">箱子堆叠</button>
+          <button data-scene="ragdoll" class="tab">布袋娃娃</button>
+        </div>
+
+        <div id="stage-wrap" class="stage-wrap">
+          <canvas id="stage"></canvas>
+          <div class="overlay">
+            <span id="stat" class="stat">载入中</span>
+          </div>
+        </div>
+
+        <p id="hint" class="hint"></p>
+
+        <div class="panel">
+          <div class="knob">
+            <label for="s-stiffness">刚度 <i>越低越软塌</i></label>
+            <input id="s-stiffness" type="range" min="0.18" max="1" step="0.01" value="0.7" />
+            <output id="v-stiffness">0.70</output>
+          </div>
+          <div class="knob">
+            <label for="s-damping">阻尼 <i>越低晃得越久</i></label>
+            <input id="s-damping" type="range" min="0.985" max="1" step="0.001" value="0.999" />
+            <output id="v-damping">0.999</output>
+          </div>
+          <div class="knob">
+            <label for="s-gravity">重力 <i>调到 0 就是太空</i></label>
+            <input id="s-gravity" type="range" min="0" max="3600" step="20" value="1700" />
+            <output id="v-gravity">1700</output>
+          </div>
+          <div class="knob">
+            <label for="s-pressure">压强 <i>把果冻吹胀或抽瘪</i></label>
+            <input id="s-pressure" type="range" min="0.7" max="2.2" step="0.01" value="1" />
+            <output id="v-pressure">1.00</output>
+          </div>
+          <div class="acts">
+            <button id="btn-wire" class="ghost">线框：关</button>
+            <button id="btn-reset" class="ghost">重置场景</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="notes">
+        <h2>它其实只在算四件事</h2>
+        <div class="cards">
+          <article>
+            <h3>1 · 质点和距离约束</h3>
+            <p>
+              没有「刚体」这种东西，全场只有一堆质点。用 Verlet 积分推它们往下掉，
+              再反复把每两个相连的质点拉回原本的距离。这就是 mass-spring model。
+            </p>
+          </article>
+          <article>
+            <h3>2 · 面积约束（压强）</h3>
+            <p>
+              果冻不塌，是因为它的轮廓面积被约束住了：算出当前围成的面积，
+              和静止面积差多少，就顺着面积对每个质点的梯度方向把它们推回去。拖压强滑块就是在改这个目标面积。
+            </p>
+          </article>
+          <article>
+            <h3>3 · 形状匹配</h3>
+            <p>
+              箱子能堆四层不倒，靠的是每帧求一个最贴合原始形状的旋转，
+              再把质点往这个「理想位置」拉。拉满就接近刚体，拉一点点就是有记忆的软体。
+            </p>
+          </article>
+          <article>
+            <h3>4 · 碰撞就是推出去</h3>
+            <p>
+              质点掉进别人的多边形里，就沿最近的边推出来，反作用力按质量分给这条边的两个端点，
+              再削掉一点切向速度当摩擦。整套求解器是 PBD——只改位置，速度自己就对了。
+            </p>
+          </article>
+        </div>
+        <p class="more">
+          想看这几条约束在代码里长什么样：<a href="/guide/">算法笔记 →</a>
+        </p>
+      </section>
+
+      <section class="credit">
+        <h2>关于原项目</h2>
+        <p>
+          <a href={SOURCE} target="_blank" rel="noopener"><b>QuarkPhysics</b></a> 是
+          {AUTHOR} 写的 2D 物理引擎，C++，MIT 协议，2023 年 4 月开源，至今仍在更新。
+          它同时支持刚体和软体：mass-spring、面积体积保持、形状匹配、自碰撞、PBD dynamics，
+          还有一个 Godot 引擎的绑定版本。
+        </p>
+        <p>
+          <b>本站不是移植，是照着它公开的算法思路用 JavaScript 重新实现的一个玩具版</b>，
+          手感和精度都不代表原引擎水平。要认真做游戏，请直接用原项目。
+        </p>
+        <p class="links">
+          <a href={SOURCE} target="_blank" rel="noopener">原仓库 GitHub ↗</a>
+          <a href="https://erayzesen.github.io/QuarkPhysics/documentation/" target="_blank" rel="noopener"
+            >原项目文档 ↗</a
+          >
+          <a href="/guide/">本站算法笔记</a>
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <span>AI 知识开放计划 · 第 17 期</span>
+      <span>算法与设计版权归 {AUTHOR}（QuarkPhysics, MIT License）</span>
+    </footer>
+
+    <script>
+      import '../scripts/app.js';
+    </script>
+
+    <style is:global>
+      :root {
+        --bg: #070a12;
+        --panel: rgba(18, 24, 40, 0.72);
+        --line: rgba(120, 160, 255, 0.16);
+        --txt: #e7eefc;
+        --dim: #8ea0c2;
+        --cy: #4de2ff;
+        --pk: #ff5fa8;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        background: var(--bg);
+        color: var(--txt);
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB',
+          'Microsoft YaHei', 'Segoe UI', system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        overflow-x: hidden;
+        position: relative;
+        min-height: 100vh;
+      }
+      .glow {
+        position: fixed;
+        border-radius: 50%;
+        filter: blur(90px);
+        pointer-events: none;
+        z-index: 0;
+      }
+      .glow-a {
+        width: 520px;
+        height: 520px;
+        background: rgba(77, 226, 255, 0.13);
+        top: -180px;
+        left: -140px;
+      }
+      .glow-b {
+        width: 460px;
+        height: 460px;
+        background: rgba(255, 95, 168, 0.11);
+        top: 30%;
+        right: -180px;
+      }
+
+      .topbar {
+        position: relative;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 14px 20px;
+        border-bottom: 1px solid var(--line);
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        font-size: 15px;
+      }
+      .brand .dot {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: var(--cy);
+        box-shadow: 0 0 14px var(--cy);
+      }
+      .src {
+        color: var(--dim);
+        font-size: 12.5px;
+        text-decoration: none;
+        border-bottom: 1px dashed rgba(142, 160, 194, 0.4);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .src:hover {
+        color: var(--cy);
+      }
+
+      main {
+        position: relative;
+        z-index: 1;
+        max-width: 1060px;
+        margin: 0 auto;
+        padding: 0 20px 40px;
+      }
+
+      .hero {
+        padding: 26px 0 16px;
+      }
+      h1 {
+        margin: 0;
+        font-size: clamp(30px, 6.4vw, 54px);
+        line-height: 1.14;
+        letter-spacing: -0.01em;
+        font-weight: 800;
+      }
+      h1 span {
+        display: block;
+      }
+      h1 .hl {
+        background: linear-gradient(92deg, var(--cy), var(--pk));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      .lede {
+        margin: 12px 0 0;
+        color: var(--dim);
+        font-size: clamp(13.5px, 3.4vw, 16px);
+        line-height: 1.72;
+        max-width: 62ch;
+      }
+      .lede b {
+        color: var(--txt);
+      }
+
+      .tabs {
+        display: flex;
+        gap: 8px;
+        overflow-x: auto;
+        padding-bottom: 10px;
+        scrollbar-width: none;
+      }
+      .tabs::-webkit-scrollbar {
+        display: none;
+      }
+      .tab {
+        flex: 0 0 auto;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--line);
+        color: var(--dim);
+        padding: 8px 15px;
+        border-radius: 999px;
+        font-size: 13.5px;
+        cursor: pointer;
+        font-family: inherit;
+        transition: 0.16s;
+      }
+      .tab:hover {
+        color: var(--txt);
+      }
+      .tab.on {
+        background: rgba(77, 226, 255, 0.14);
+        border-color: rgba(77, 226, 255, 0.55);
+        color: #dff8ff;
+        box-shadow: 0 0 18px rgba(77, 226, 255, 0.18);
+      }
+
+      .stage-wrap {
+        position: relative;
+        height: min(60vh, 560px);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        overflow: hidden;
+        background:
+          radial-gradient(120% 90% at 50% 0%, rgba(60, 100, 180, 0.15), transparent 65%),
+          #060911;
+        touch-action: none;
+      }
+      #stage {
+        display: block;
+        width: 100%;
+        height: 100%;
+        cursor: grab;
+      }
+      .overlay {
+        position: absolute;
+        top: 10px;
+        right: 12px;
+        pointer-events: none;
+      }
+      .stat {
+        font-size: 11.5px;
+        color: rgba(190, 210, 240, 0.6);
+        font-variant-numeric: tabular-nums;
+        background: rgba(6, 10, 20, 0.5);
+        padding: 3px 8px;
+        border-radius: 6px;
+      }
+      .hint {
+        margin: 10px 2px 14px;
+        font-size: 13px;
+        color: var(--dim);
+        line-height: 1.6;
+      }
+
+      .panel {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+        gap: 14px 22px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 16px 18px;
+        backdrop-filter: blur(8px);
+      }
+      .knob label {
+        display: block;
+        font-size: 12.5px;
+        margin-bottom: 6px;
+        color: #cddcf5;
+      }
+      .knob label i {
+        font-style: normal;
+        color: #6c7f9f;
+        font-size: 11.5px;
+        margin-left: 4px;
+      }
+      .knob {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        grid-template-areas: 'l l' 'i o';
+        align-items: center;
+        gap: 0 10px;
+      }
+      .knob label {
+        grid-area: l;
+      }
+      .knob input {
+        grid-area: i;
+      }
+      .knob output {
+        grid-area: o;
+        font-size: 12px;
+        color: var(--cy);
+        font-variant-numeric: tabular-nums;
+        min-width: 44px;
+        text-align: right;
+      }
+      input[type='range'] {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 100%;
+        height: 22px;
+        background: transparent;
+        cursor: pointer;
+      }
+      input[type='range']::-webkit-slider-runnable-track {
+        height: 4px;
+        border-radius: 2px;
+        background: rgba(140, 175, 235, 0.22);
+      }
+      input[type='range']::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 17px;
+        height: 17px;
+        margin-top: -6.5px;
+        border-radius: 50%;
+        background: var(--cy);
+        box-shadow: 0 0 10px rgba(77, 226, 255, 0.7);
+      }
+      input[type='range']::-moz-range-track {
+        height: 4px;
+        border-radius: 2px;
+        background: rgba(140, 175, 235, 0.22);
+      }
+      input[type='range']::-moz-range-thumb {
+        width: 15px;
+        height: 15px;
+        border: none;
+        border-radius: 50%;
+        background: var(--cy);
+      }
+      .acts {
+        display: flex;
+        gap: 9px;
+        align-items: flex-end;
+      }
+      .ghost {
+        flex: 1;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--line);
+        color: #cddcf5;
+        border-radius: 9px;
+        padding: 9px 10px;
+        font-size: 12.5px;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .ghost:hover {
+        border-color: rgba(77, 226, 255, 0.5);
+        color: #fff;
+      }
+      .ghost.on {
+        background: rgba(77, 226, 255, 0.14);
+        border-color: rgba(77, 226, 255, 0.55);
+        color: #dff8ff;
+      }
+
+      .notes,
+      .credit {
+        margin-top: 42px;
+      }
+      h2 {
+        font-size: clamp(19px, 4.4vw, 25px);
+        margin: 0 0 16px;
+        font-weight: 700;
+      }
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(255px, 1fr));
+        gap: 14px;
+      }
+      .cards article {
+        background: rgba(255, 255, 255, 0.035);
+        border: 1px solid var(--line);
+        border-radius: 13px;
+        padding: 16px 17px;
+      }
+      .cards h3 {
+        margin: 0 0 8px;
+        font-size: 14.5px;
+        color: var(--cy);
+        font-weight: 700;
+      }
+      .cards p {
+        margin: 0;
+        font-size: 13.2px;
+        line-height: 1.78;
+        color: #a8b8d4;
+      }
+      .more {
+        margin-top: 16px;
+        font-size: 13.5px;
+        color: var(--dim);
+      }
+      .credit p {
+        font-size: 13.6px;
+        line-height: 1.85;
+        color: #a8b8d4;
+        max-width: 74ch;
+      }
+      .credit b {
+        color: var(--txt);
+      }
+      a {
+        color: var(--cy);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        font-size: 13.5px;
+      }
+
+      footer {
+        position: relative;
+        z-index: 1;
+        border-top: 1px solid var(--line);
+        margin-top: 44px;
+        padding: 20px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 18px;
+        justify-content: center;
+        font-size: 12px;
+        color: #6c7f9f;
+        text-align: center;
+      }
+
+      @media (max-width: 640px) {
+        main {
+          padding: 0 14px 32px;
+        }
+        .topbar {
+          padding: 11px 14px;
+          gap: 8px;
+        }
+        .src {
+          font-size: 11px;
+          max-width: 46%;
+        }
+        .hero {
+          padding: 18px 0 12px;
+        }
+        .lede {
+          margin-top: 9px;
+        }
+        .stage-wrap {
+          height: 46vh;
+          min-height: 320px;
+          border-radius: 13px;
+        }
+        .panel {
+          padding: 13px 14px;
+          gap: 11px 16px;
+        }
+        .acts {
+          margin-top: 2px;
+        }
+      }
+    </style>
+  </body>
+</html>
